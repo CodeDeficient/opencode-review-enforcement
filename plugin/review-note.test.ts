@@ -46,6 +46,10 @@ describe("extractSha", () => {
   it("matches hex at start of string", () => {
     expect(extractSha("abc1234 is the sha")).toBe("abc1234")
   })
+
+  it("returns null when hex is preceded by # (PR ref)", () => {
+    expect(extractSha("#1234567")).toBeNull()
+  })
 })
 
 describe("extractPrNumber", () => {
@@ -93,6 +97,11 @@ describe("isReviewTask", () => {
 
   it("returns false when command is a non-review command", () => {
     expect(isReviewTask({ command: "build" })).toBe(false)
+  })
+
+  it("returns false when command starts with review but is not a review command", () => {
+    expect(isReviewTask({ command: "reviewer" })).toBe(false)
+    expect(isReviewTask({ command: "reviewNotes" })).toBe(false)
   })
 
   it("returns false for empty args", () => {
@@ -166,6 +175,19 @@ describe("resolveTargetSha", () => {
 
     expect(result.sha).toBe("prsha789")
     expect(result.source).toBe("PR #742")
+  })
+
+  it("falls through to PR resolver when 7+ digit PR number is not mistaken for SHA", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "HEAD" ? ok("headsha") : fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "pr_long" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetSha("review #1234567", deps)
+
+    expect(result.sha).toBe("pr_long")
+    expect(result.source).toBe("PR #1234567")
   })
 
   it("falls through to HEAD when SHA fails and PR fails", async () => {

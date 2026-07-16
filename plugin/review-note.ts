@@ -18,14 +18,14 @@ export function extractPrNumber(text: string): string | null {
   return match ? match[1] : null
 }
 
-/** Extract a bare 7–40 char hex SHA from a string. */
+/** Extract a bare 7–40 char hex SHA from a string, rejecting #-prefixed hex (PR refs). */
 export function extractSha(text: string): string | null {
-  const match = text.match(/\b([0-9a-f]{7,40})\b/i)
+  const match = text.match(/(?<!#)\b([0-9a-f]{7,40})\b/i)
   return match ? match[1] : null
 }
 
 export function isReviewTask(args: { command?: string; subagent_type?: string }): boolean {
-  return args.command?.startsWith("review") === true || args.subagent_type === "reviewer"
+  return args.command === "review" || args.command?.startsWith("review ") === true || args.subagent_type === "reviewer"
 }
 
 export type RunResult = {
