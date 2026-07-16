@@ -48,22 +48,22 @@ export default (async ({ $, client }) => {
         let sha: string | null = null
         let source = ""
 
-        const prNum = extractPrNumber(searchText)
-        if (prNum) {
-          log(client, "info", `Found PR #${prNum} in description, resolving headRefOid`)
-          const result = await $`gh pr view ${prNum} --json headRefOid`.quiet()
-          const json = JSON.parse(result.stdout.toString())
-          sha = json.headRefOid ?? null
-          source = `PR #${prNum}`
+        const hexSha = extractSha(description)
+        if (hexSha) {
+          log(client, "info", `Found SHA ${hexSha} in description, resolving to full hash`)
+          const result = await $`git rev-parse ${hexSha}`.quiet()
+          sha = result.stdout.toString().trim() || null
+          source = `description:${hexSha}`
         }
 
         if (!sha) {
-          const hexSha = extractSha(description)
-          if (hexSha) {
-            log(client, "info", `Found SHA ${hexSha} in description, resolving to full hash`)
-            const result = await $`git rev-parse ${hexSha}`.quiet()
-            sha = result.stdout.toString().trim() || null
-            source = `description:${hexSha}`
+          const prNum = extractPrNumber(searchText)
+          if (prNum) {
+            log(client, "info", `Found PR #${prNum} in description, resolving headRefOid`)
+            const result = await $`gh pr view ${prNum} --json headRefOid`.quiet()
+            const json = JSON.parse(result.stdout.toString())
+            sha = json.headRefOid ?? null
+            source = `PR #${prNum}`
           }
         }
 
