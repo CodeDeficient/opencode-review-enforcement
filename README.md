@@ -121,12 +121,12 @@ The plugin uses `Reviewed-by: opencode-review-subagent` as the marker in git not
 
 ## How the Plugin Works
 
-The plugin hooks into OpenCode's `tool.execute.after` event. When a `task` tool call completes with `subagent_type: "reviewer"` or `command: "review"`, it:
+The plugin hooks into OpenCode's `tool.execute.after` event. When a `task` tool call completes with `subagent_type: "reviewer"` or `command: "review"`, it resolves the target commit in this priority order:
 
-1. Extracts the commit SHA from the task's `description` field (e.g., `"review commit abc1234"`)
-2. Falls back to `git rev-parse HEAD` if no SHA is found (ship-cycle always commits before reviewing)
-3. Resolves PR numbers via `gh pr view` for PR reviews
-4. Attaches the review output as a git note with the marker and review status
+1. **Explicit SHA** — Extracted from the task's `description` field (e.g., `"review commit abc1234"`). An explicit SHA in the description takes highest priority because it identifies a specific commit, unlike a PR reference which resolves to the PR's mutable head.
+2. **PR number** — Extracted from the task's `description` or `prompt` fields (e.g., `"#742"`). Resolved to the PR's `headRefOid` via `gh pr view`.
+3. **HEAD** — Falls back to `git rev-parse HEAD` if neither SHA nor PR number is found.
+4. **Attaches** the review output as a git note with the marker and review status.
 
 ## Files
 
