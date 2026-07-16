@@ -88,19 +88,6 @@ describe("resolveTargetSha", () => {
     expect(result.source).toBe("HEAD")
   })
 
-  it("returns HEAD even when HEAD rev-parse succeeds", async () => {
-    const deps: ResolverDeps = {
-      revParse: async (ref) => ref === "HEAD" ? ok("abc1234") : fail(),
-      prView: async () => fail(),
-      log: () => {},
-    }
-
-    const result = await resolveTargetSha("", "", deps)
-
-    expect(result.sha).toBe("abc1234")
-    expect(result.source).toBe("HEAD")
-  })
-
   it("returns null when all resolvers fail", async () => {
     const deps: ResolverDeps = {
       revParse: async () => fail(),
