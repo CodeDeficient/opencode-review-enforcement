@@ -190,6 +190,21 @@ describe("resolveTargetSha", () => {
     expect(result.source).toBe("PR #1234567")
   })
 
+  it("treats bare decimal in prompt as SHA, overriding PR ref", async () => {
+    let prViewCalled = false
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "1234567" ? ok("bare_decimal_sha") : fail(),
+      prView: async () => { prViewCalled = true; return ok(JSON.stringify({ headRefOid: "prsha" })) },
+      log: () => {},
+    }
+
+    const result = await resolveTargetSha("review issue 1234567 and check #742", deps)
+
+    expect(result.sha).toBe("bare_decimal_sha")
+    expect(result.source).toBe("sha:1234567")
+    expect(prViewCalled).toBe(false)
+  })
+
   it("falls through to HEAD when SHA fails and PR fails", async () => {
     const deps: ResolverDeps = {
       revParse: async (ref) => ref === "HEAD" ? ok("headsha") : fail(),
