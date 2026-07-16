@@ -3,7 +3,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 const REVIEW_MARKER = "Reviewed-by: opencode-review-subagent"
 const SERVICE = "review-note-plugin"
 
-type LogLevel = "info" | "warn" | "error"
+export type LogLevel = "info" | "warn" | "error"
 
 function log(client: unknown, level: LogLevel, message: string): void {
   const c = client as { app?: { log?: (input: { body: { service: string; level: LogLevel; message: string } }) => void } }
@@ -13,15 +13,80 @@ function log(client: unknown, level: LogLevel, message: string): void {
 }
 
 /** Extract a PR number (#NNN) from a string. */
-function extractPrNumber(text: string): string | null {
+export function extractPrNumber(text: string): string | null {
   const match = text.match(/#(\d+)/)
   return match ? match[1] : null
 }
 
 /** Extract a bare 7–40 char hex SHA from a string. */
-function extractSha(text: string): string | null {
+export function extractSha(text: string): string | null {
   const match = text.match(/\b([0-9a-f]{7,40})\b/i)
   return match ? match[1] : null
+}
+
+export type RunResult = {
+  stdout: string
+  stderr: string
+  exitCode: number
+}
+
+export interface ResolverDeps {
+  revParse(ref: string): Promise<RunResult>
+  prView(prNum: string): Promise<RunResult>
+  log(level: LogLevel, message: string): void
+}
+
+export async function resolveTargetSha(
+  description: string,
+  searchText: string,
+  deps: ResolverDeps,
+): Promise<{ sha: string | null; source: string }> {
+  let sha: string | null = null
+  let source = ""
+
+  const hexSha = extractSha(description)
+  if (hexSha) {
+    deps.log("info", `Found SHA ${hexSha} in description, resolving to full hash`)
+    const result = await deps.revParse(hexSha)
+    if (result.exitCode === 0) {
+      sha = result.stdout.trim() || null
+      source = `description:${hexSha}`
+    } else {
+      deps.log("warn", `git rev-parse failed for ${hexSha} (exit ${result.exitCode}), falling through`)
+    }
+  }
+
+  if (!sha) {
+    const prNum = extractPrNumber(searchText)
+    if (prNum) {
+      deps.log("info", `Found PR #${prNum} in description or prompt, resolving headRefOid`)
+      const result = await deps.prView(prNum)
+      if (result.exitCode === 0) {
+        try {
+          const json = JSON.parse(result.stdout)
+          sha = json.headRefOid ?? null
+          source = `PR #${prNum}`
+        } catch {
+          deps.log("warn", `Failed to parse gh pr view output for PR #${prNum}, falling through to HEAD`)
+        }
+      } else {
+        deps.log("warn", `gh pr view failed for PR #${prNum} (exit ${result.exitCode}), falling through to HEAD`)
+      }
+    }
+  }
+
+  if (!sha) {
+    deps.log("info", "Falling back to HEAD")
+    const result = await deps.revParse("HEAD")
+    if (result.exitCode === 0) {
+      sha = result.stdout.trim() || null
+      source = "HEAD"
+    } else {
+      deps.log("warn", `git rev-parse HEAD failed (exit ${result.exitCode})`)
+    }
+  }
+
+  return { sha, source }
 }
 
 export default (async ({ $, client }) => {
@@ -44,35 +109,20 @@ export default (async ({ $, client }) => {
       const prompt = args.prompt ?? ""
       const searchText = `${description} ${prompt}`
 
+      const deps: ResolverDeps = {
+        revParse: async (ref) => {
+          const result = await $`git rev-parse ${ref}`.nothrow().quiet()
+          return { stdout: result.stdout.toString(), stderr: result.stderr.toString(), exitCode: result.exitCode ?? 1 }
+        },
+        prView: async (prNum) => {
+          const result = await $`gh pr view ${prNum} --json headRefOid`.nothrow().quiet()
+          return { stdout: result.stdout.toString(), stderr: result.stderr.toString(), exitCode: result.exitCode ?? 1 }
+        },
+        log: (level, message) => log(client, level, message),
+      }
+
       try {
-        let sha: string | null = null
-        let source = ""
-
-        const hexSha = extractSha(description)
-        if (hexSha) {
-          log(client, "info", `Found SHA ${hexSha} in description, resolving to full hash`)
-          const result = await $`git rev-parse ${hexSha}`.quiet()
-          sha = result.stdout.toString().trim() || null
-          source = `description:${hexSha}`
-        }
-
-        if (!sha) {
-          const prNum = extractPrNumber(searchText)
-          if (prNum) {
-            log(client, "info", `Found PR #${prNum} in description, resolving headRefOid`)
-            const result = await $`gh pr view ${prNum} --json headRefOid`.quiet()
-            const json = JSON.parse(result.stdout.toString())
-            sha = json.headRefOid ?? null
-            source = `PR #${prNum}`
-          }
-        }
-
-        if (!sha) {
-          log(client, "info", "No SHA or PR found in description, falling back to HEAD")
-          const result = await $`git rev-parse HEAD`.quiet()
-          sha = result.stdout.toString().trim() || null
-          source = "HEAD"
-        }
+        const { sha, source } = await resolveTargetSha(description, searchText, deps)
 
         if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) {
           log(client, "warn", `Could not resolve a valid SHA (source=${source}, sha=${sha ?? "null"})`)
