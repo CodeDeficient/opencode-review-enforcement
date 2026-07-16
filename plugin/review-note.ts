@@ -18,10 +18,14 @@ export function extractPrNumber(text: string): string | null {
   return match ? match[1] : null
 }
 
-/** Extract a bare 7–40 char hex SHA from a string. */
+/** Extract a bare 7–40 char hex SHA from a string, rejecting #-prefixed hex (PR refs). */
 export function extractSha(text: string): string | null {
-  const match = text.match(/\b([0-9a-f]{7,40})\b/i)
+  const match = text.match(/(?<!#)\b([0-9a-f]{7,40})\b/i)
   return match ? match[1] : null
+}
+
+export function isReviewTask(args: { command?: string; subagent_type?: string }): boolean {
+  return args.command === "review" || args.command?.startsWith("review ") === true || args.subagent_type === "reviewer"
 }
 
 export type RunResult = {
@@ -37,20 +41,19 @@ export interface ResolverDeps {
 }
 
 export async function resolveTargetSha(
-  description: string,
   searchText: string,
   deps: ResolverDeps,
 ): Promise<{ sha: string | null; source: string }> {
   let sha: string | null = null
   let source = ""
 
-  const hexSha = extractSha(description)
+  const hexSha = extractSha(searchText)
   if (hexSha) {
-    deps.log("info", `Found SHA ${hexSha} in description, resolving to full hash`)
+    deps.log("info", `Found SHA ${hexSha}, resolving to full hash`)
     const result = await deps.revParse(hexSha)
     if (result.exitCode === 0) {
       sha = result.stdout.trim() || null
-      source = `description:${hexSha}`
+      source = `sha:${hexSha}`
     } else {
       deps.log("warn", `git rev-parse failed for ${hexSha} (exit ${result.exitCode}), falling through`)
     }
@@ -59,7 +62,7 @@ export async function resolveTargetSha(
   if (!sha) {
     const prNum = extractPrNumber(searchText)
     if (prNum) {
-      deps.log("info", `Found PR #${prNum} in description or prompt, resolving headRefOid`)
+      deps.log("info", `Found PR #${prNum}, resolving headRefOid`)
       const result = await deps.prView(prNum)
       if (result.exitCode === 0) {
         try {
@@ -101,13 +104,14 @@ export default (async ({ $, client }) => {
         subagent_type?: string
       }
 
-      const isReview = args.command === "review" || args.subagent_type === "reviewer"
+      const isReview = isReviewTask(args)
       if (!isReview) return
 
       const reviewText = output?.output ?? ""
       const description = args.description ?? ""
       const prompt = args.prompt ?? ""
-      const searchText = `${description} ${prompt}`
+      const command = args.command ?? ""
+      const searchText = `${description} ${prompt} ${command}`
 
       const deps: ResolverDeps = {
         revParse: async (ref) => {
@@ -122,7 +126,7 @@ export default (async ({ $, client }) => {
       }
 
       try {
-        const { sha, source } = await resolveTargetSha(description, searchText, deps)
+        const { sha, source } = await resolveTargetSha(searchText, deps)
 
         if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) {
           log(client, "warn", `Could not resolve a valid SHA (source=${source}, sha=${sha ?? "null"})`)
