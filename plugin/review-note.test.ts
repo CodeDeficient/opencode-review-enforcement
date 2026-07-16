@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test"
-import { extractSha, extractPrNumber, resolveTargetSha, type ResolverDeps, type RunResult } from "./review-note"
+import { extractSha, extractPrNumber, isReviewTask, resolveTargetSha, type ResolverDeps, type RunResult } from "./review-note"
 
 function ok(stdout: string): RunResult {
   return { stdout, stderr: "", exitCode: 0 }
@@ -74,6 +74,32 @@ describe("extractPrNumber", () => {
   })
 })
 
+describe("isReviewTask", () => {
+  it("returns true when command is exactly 'review'", () => {
+    expect(isReviewTask({ command: "review" })).toBe(true)
+  })
+
+  it("returns true when command starts with 'review' and includes extra text", () => {
+    expect(isReviewTask({ command: "review 4c2df93" })).toBe(true)
+  })
+
+  it("returns true when subagent_type is 'reviewer' without command", () => {
+    expect(isReviewTask({ subagent_type: "reviewer" })).toBe(true)
+  })
+
+  it("returns true when both command and subagent_type are set", () => {
+    expect(isReviewTask({ command: "review 4c2df93", subagent_type: "reviewer" })).toBe(true)
+  })
+
+  it("returns false when command is a non-review command", () => {
+    expect(isReviewTask({ command: "build" })).toBe(false)
+  })
+
+  it("returns false for empty args", () => {
+    expect(isReviewTask({})).toBe(false)
+  })
+})
+
 describe("resolveTargetSha", () => {
   it("returns HEAD when no SHA and no PR are present", async () => {
     const deps: ResolverDeps = {
@@ -82,7 +108,7 @@ describe("resolveTargetSha", () => {
       log: () => {},
     }
 
-    const result = await resolveTargetSha("", "", deps)
+    const result = await resolveTargetSha("", deps)
 
     expect(result.sha).toBe("abc1234")
     expect(result.source).toBe("HEAD")
@@ -95,7 +121,7 @@ describe("resolveTargetSha", () => {
       log: () => {},
     }
 
-    const result = await resolveTargetSha("", "", deps)
+    const result = await resolveTargetSha("", deps)
 
     expect(result.sha).toBeNull()
     expect(result.source).toBe("")
@@ -108,7 +134,7 @@ describe("resolveTargetSha", () => {
       log: () => {},
     }
 
-    const result = await resolveTargetSha("", "review #742", deps)
+    const result = await resolveTargetSha("review #742", deps)
 
     expect(result.sha).toBe("prsha123")
     expect(result.source).toBe("PR #742")
@@ -122,10 +148,10 @@ describe("resolveTargetSha", () => {
       log: () => {},
     }
 
-    const result = await resolveTargetSha("review commit abc1234", "", deps)
+    const result = await resolveTargetSha("review commit abc1234", deps)
 
     expect(result.sha).toBe("fullsha123")
-    expect(result.source).toBe("description:abc1234")
+    expect(result.source).toBe("sha:abc1234")
     expect(prViewCalled).toBe(false)
   })
 
@@ -136,7 +162,7 @@ describe("resolveTargetSha", () => {
       log: () => {},
     }
 
-    const result = await resolveTargetSha("review commit deadbeef", "#742", deps)
+    const result = await resolveTargetSha("review commit deadbeef #742", deps)
 
     expect(result.sha).toBe("prsha789")
     expect(result.source).toBe("PR #742")
@@ -149,7 +175,7 @@ describe("resolveTargetSha", () => {
       log: () => {},
     }
 
-    const result = await resolveTargetSha("review commit deadbeef", "#742", deps)
+    const result = await resolveTargetSha("review commit deadbeef #742", deps)
 
     expect(result.sha).toBe("headsha")
     expect(result.source).toBe("HEAD")
@@ -162,7 +188,7 @@ describe("resolveTargetSha", () => {
       log: () => {},
     }
 
-    const result = await resolveTargetSha("", "#742", deps)
+    const result = await resolveTargetSha("#742", deps)
 
     expect(result.sha).toBe("headsha")
     expect(result.source).toBe("HEAD")
@@ -175,7 +201,7 @@ describe("resolveTargetSha", () => {
       log: () => {},
     }
 
-    const result = await resolveTargetSha("", "#742", deps)
+    const result = await resolveTargetSha("#742", deps)
 
     expect(result.sha).toBe("headsha")
     expect(result.source).toBe("HEAD")
@@ -188,9 +214,22 @@ describe("resolveTargetSha", () => {
       log: () => {},
     }
 
-    const result = await resolveTargetSha("deadbeef", "#742", deps)
+    const result = await resolveTargetSha("deadbeef #742", deps)
 
     expect(result.sha).toBeNull()
     expect(result.source).toBe("")
+  })
+
+  it("extracts SHA from prompt content in searchText", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "def5678" ? ok("fullpromptsha") : fail(),
+      prView: async () => fail(),
+      log: () => {},
+    }
+
+    const result = await resolveTargetSha("Please carefully review commit def5678 for any issues", deps)
+
+    expect(result.sha).toBe("fullpromptsha")
+    expect(result.source).toBe("sha:def5678")
   })
 })
