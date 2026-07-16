@@ -62,7 +62,7 @@ export async function resolveTargetSha(
   if (!sha) {
     const prNum = extractPrNumber(searchText)
     if (prNum) {
-      deps.log("info", `Found PR #${prNum} in description or prompt, resolving headRefOid`)
+      deps.log("info", `Found PR #${prNum}, resolving headRefOid`)
       const result = await deps.prView(prNum)
       if (result.exitCode === 0) {
         try {
