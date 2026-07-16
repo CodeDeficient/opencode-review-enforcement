@@ -59,7 +59,7 @@ export async function resolveTargetSha(
   if (!sha) {
     const prNum = extractPrNumber(searchText)
     if (prNum) {
-      deps.log("info", `Found PR #${prNum} in description, resolving headRefOid`)
+      deps.log("info", `Found PR #${prNum} in description or prompt, resolving headRefOid`)
       const result = await deps.prView(prNum)
       if (result.exitCode === 0) {
         try {
@@ -76,7 +76,7 @@ export async function resolveTargetSha(
   }
 
   if (!sha) {
-    deps.log("info", "No SHA or PR found in description, falling back to HEAD")
+    deps.log("info", "Falling back to HEAD")
     const result = await deps.revParse("HEAD")
     if (result.exitCode === 0) {
       sha = result.stdout.trim() || null
