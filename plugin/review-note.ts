@@ -49,13 +49,27 @@ function isTargetOnlyPrompt(prompt: string): boolean {
   if (!trimmed) return false
   if (trimmed.includes("\n")) return false
 
-  if (/^[0-9a-f]{7,40}$/i.test(trimmed)) return true
+  const target = stripTargetSelectorPrefix(trimmed)
+  if (!target) return false
 
-  if (/^(PR\s+)?#\d+$/i.test(trimmed)) return true
+  if (/^[0-9a-f]{7,40}$/i.test(target)) return true
 
-  if (trimmed.length <= 100 && /^[\w\-.\\/]+$/.test(trimmed)) return true
+  if (/^(PR\s+)?#\d+$/i.test(target)) return true
+
+  if (target.length <= 100 && /^[\w\-.\\/]+$/.test(target)) return true
 
   return false
+}
+
+function stripTargetSelectorPrefix(text: string): string {
+  const lower = text.toLowerCase()
+  const prefixes = ["review commit ", "review pr ", "review branch ", "review "]
+  for (const prefix of prefixes) {
+    if (lower.startsWith(prefix)) {
+      return text.slice(prefix.length).trim()
+    }
+  }
+  return text
 }
 
 export type RunResult = {
