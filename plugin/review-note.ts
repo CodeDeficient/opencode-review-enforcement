@@ -24,7 +24,7 @@ export function extractSha(text: string): string | null {
   let match: RegExpExecArray | null
   while ((match = regex.exec(text)) !== null) {
     const before = text.slice(0, match.index).trimEnd()
-    if (!/PR$/i.test(before)) return match[1]
+    if (!/pr[\W_]*$/i.test(before)) return match[1]
   }
   return null
 }

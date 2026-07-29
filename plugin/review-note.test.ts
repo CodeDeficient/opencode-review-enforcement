@@ -58,6 +58,22 @@ describe("extractSha", () => {
   it("returns null when hex is preceded by PR in natural prompt", () => {
     expect(extractSha("Review PR 1234567")).toBeNull()
   })
+
+  it("returns null when hex is preceded by pr- (branch name like upgrade-pr-1234567)", () => {
+    expect(extractSha("Review branch upgrade-pr-1234567")).toBeNull()
+  })
+
+  it("returns null when hex is preceded by pr_ (underscore variant)", () => {
+    expect(extractSha("upgrade_pr_1234567")).toBeNull()
+  })
+
+  it("returns null when hex is preceded by pr/ (path variant)", () => {
+    expect(extractSha("feature/pr/1234567")).toBeNull()
+  })
+
+  it("still extracts hex after unrelated word ending in prep (not pr boundary)", () => {
+    expect(extractSha("upgrade prep 1234567")).toBe("1234567")
+  })
 })
 
 describe("extractPrNumber", () => {
