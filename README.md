@@ -71,6 +71,8 @@ The plugin is auto-discovered from `.opencode/plugins/`. Restart OpenCode to loa
 
 Type `/review <sha>` in the OpenCode TUI. The plugin automatically attaches the review output as a git note.
 
+Note: The visible reviewer task prompt is intentionally only `Input: <target>`. The full review methodology is in `agent/reviewer.md` as the reviewer subagent system prompt. Seeing only the input is expected and does not mean the methodology was omitted.
+
 ### Agent-initiated review
 
 Spawn a reviewer subagent via the `task` tool. The reviewer agent has the full review methodology in its system prompt — just pass the SHA:
