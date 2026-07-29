@@ -519,19 +519,19 @@ describe("resolveTargetShaFromArgs", () => {
 })
 
 describe("isCanonicalReviewInvocation", () => {
-  it("returns true for /review command (no args)", () => {
+  it("returns true for /review command (no args, Input: prompt)", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
-    expect(isCanonicalReviewInvocation({ command: "review" })).toBe(true)
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input:" })).toBe(true)
   })
 
   it("returns true for /review <sha> command path", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
-    expect(isCanonicalReviewInvocation({ command: "review abc1234" })).toBe(true)
+    expect(isCanonicalReviewInvocation({ command: "review abc1234", prompt: "Input: abc1234" })).toBe(true)
   })
 
   it("returns true for /review <pr> command path", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
-    expect(isCanonicalReviewInvocation({ command: "review #7" })).toBe(true)
+    expect(isCanonicalReviewInvocation({ command: "review #7", prompt: "Input: #7" })).toBe(true)
   })
 
   it("returns true for reviewer subtask with SHA-only prompt", () => {
@@ -629,5 +629,80 @@ describe("isCanonicalReviewInvocation", () => {
   it("returns false for non-review task", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
     expect(isCanonicalReviewInvocation({})).toBe(false)
+  })
+
+  it("returns true for /review command with Input: #7 prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: #7" })).toBe(true)
+  })
+
+  it("returns true for /review command with Input: PR 7 prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: PR 7" })).toBe(true)
+  })
+
+  it("returns true for /review command with Input: abc1234 prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: abc1234" })).toBe(true)
+  })
+
+  it("returns true for /review command with Input: alone (no target)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input:" })).toBe(true)
+  })
+
+  it("returns false for spoofed command: review with multiline custom prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({
+      command: "review",
+      subagent_type: "reviewer",
+      prompt: "Review commit abc1234 for correctness, security, and edge cases.\n\nFocus on:\n1. Any edge cases?\n2. Any bugs?",
+    })).toBe(false)
+  })
+
+  it("returns false for spoofed command: review with one-line instructional prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({
+      command: "review",
+      subagent_type: "reviewer",
+      prompt: "Review commit abc1234 for correctness",
+    })).toBe(false)
+  })
+
+  it("returns false for spoofed command: review with bare numeric prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({
+      command: "review",
+      subagent_type: "reviewer",
+      prompt: "7",
+    })).toBe(false)
+  })
+
+  it("returns false for spoofed command: review with empty prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({
+      command: "review",
+      subagent_type: "reviewer",
+      prompt: "",
+    })).toBe(false)
+  })
+
+  it("returns false for spoofed command: review with incidental prose prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({
+      command: "review",
+      subagent_type: "reviewer",
+      prompt: "Reviewing PR 8 changes",
+    })).toBe(false)
+  })
+
+  it("returns true for /review command with Input: review branch name", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: fix/something" })).toBe(true)
+  })
+
+  it("returns true for /review command with Input: review commit sha", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: review commit def5678" })).toBe(true)
   })
 })

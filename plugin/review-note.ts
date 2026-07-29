@@ -39,7 +39,8 @@ export function isCanonicalReviewInvocation(args: {
   prompt?: string
 }): boolean {
   if (args.command === "review" || args.command?.startsWith("review ") === true) {
-    return true
+    const prompt = (args.prompt ?? "").trim()
+    return prompt.startsWith("Input:")
   }
 
   if (args.subagent_type !== "reviewer") {
