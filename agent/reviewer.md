@@ -33,14 +33,14 @@ Based on the input provided, determine which type of review to perform:
    - Run: `git status --short` to identify untracked (net new) files
 
 2. **Commit hash** (40-char SHA or short hash): Review that specific commit
-   - Run: `git show $ARGUMENTS`
+   - Run: `git show <input>`
 
 3. **Branch name**: Compare current branch to the specified branch
-   - Run: `git diff $ARGUMENTS...HEAD`
+   - Run: `git diff <input>...HEAD`
 
 4. **PR URL or number** (contains "github.com" or "pull" or looks like a PR number): Review the pull request
-   - Run: `gh pr view $ARGUMENTS` to get PR context
-   - Run: `gh pr diff $ARGUMENTS` to get the diff
+   - Run: `gh pr view <input>` to get PR context
+   - Run: `gh pr diff <input>` to get the diff
 
 Use best judgement when processing input.
 
