@@ -73,13 +73,13 @@ Type `/review <sha>` in the OpenCode TUI. The plugin automatically attaches the 
 
 ### Agent-initiated review
 
-Spawn a reviewer subagent via the `task` tool:
+Spawn a reviewer subagent via the `task` tool. The reviewer agent has the full review methodology in its system prompt — just pass the SHA:
 
 ```
 task(
   subagent_type: "reviewer",
   description: "review commit abc1234",
-  prompt: "<Review Subagent Prompt with {INPUT} replaced by abc1234>"
+  prompt: "abc1234"
 )
 ```
 
