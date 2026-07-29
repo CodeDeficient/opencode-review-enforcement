@@ -12,9 +12,9 @@ function log(client: unknown, level: LogLevel, message: string): void {
   })
 }
 
-/** Extract a PR number (#NNN) from a string. */
+/** Extract a PR number (#NNN or PR NNN) from a string. */
 export function extractPrNumber(text: string): string | null {
-  const match = text.match(/#(\d+)/)
+  const match = text.match(/#(\d+)/) || text.match(/(?:^|\s)PR\s+(\d+)\b/i)
   return match ? match[1] : null
 }
 
@@ -55,6 +55,9 @@ function isTargetOnlyPrompt(prompt: string): boolean {
   if (/^[0-9a-f]{7,40}$/i.test(target)) return true
 
   if (/^(PR\s+)?#\d+$/i.test(target)) return true
+  if (/^PR\s+\d+$/i.test(target)) return true
+
+  if (/^\d+$/.test(target)) return false
 
   if (target.length <= 100 && /^[\w\-.\\/]+$/.test(target)) return true
 
@@ -63,7 +66,7 @@ function isTargetOnlyPrompt(prompt: string): boolean {
 
 function stripTargetSelectorPrefix(text: string): string {
   const lower = text.toLowerCase()
-  const prefixes = ["review commit ", "review pr ", "review branch ", "review "]
+  const prefixes = ["review commit ", "review branch ", "review "]
   for (const prefix of prefixes) {
     if (lower.startsWith(prefix)) {
       return text.slice(prefix.length).trim()

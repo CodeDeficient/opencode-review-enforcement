@@ -76,6 +76,18 @@ describe("extractPrNumber", () => {
   it("extracts PR number without word boundary before hash", () => {
     expect(extractPrNumber("text#742")).toBe("742")
   })
+
+  it("extracts PR number from 'PR 7' without hash", () => {
+    expect(extractPrNumber("PR 7")).toBe("7")
+  })
+
+  it("extracts PR number from 'Review PR 7' without hash", () => {
+    expect(extractPrNumber("Review PR 7")).toBe("7")
+  })
+
+  it("extracts PR number from 'PR #7' with hash", () => {
+    expect(extractPrNumber("PR #7")).toBe("7")
+  })
 })
 
 describe("isReviewTask", () => {
@@ -257,6 +269,32 @@ describe("resolveTargetSha", () => {
     expect(result.source).toBe("")
   })
 
+  it("resolves 'PR 7' without hash via extractPrNumber", async () => {
+    const deps: ResolverDeps = {
+      revParse: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_nohash" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetSha("PR 7", deps)
+
+    expect(result.sha).toBe("prsha_nohash")
+    expect(result.source).toBe("PR #7")
+  })
+
+  it("resolves 'Review PR 7' without hash via extractPrNumber", async () => {
+    const deps: ResolverDeps = {
+      revParse: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_review" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetSha("Review PR 7", deps)
+
+    expect(result.sha).toBe("prsha_review")
+    expect(result.source).toBe("PR #7")
+  })
+
   it("extracts SHA from prompt content in searchText", async () => {
     const deps: ResolverDeps = {
       revParse: async (ref) => ref === "def5678" ? ok("fullpromptsha") : fail(),
@@ -326,6 +364,31 @@ describe("isCanonicalReviewInvocation", () => {
   it("returns true for 'Review PR #7' natural prompt", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
     expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review PR #7" })).toBe(true)
+  })
+
+  it("returns true for 'Review PR 7' natural prompt (no hash)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review PR 7" })).toBe(true)
+  })
+
+  it("returns true for 'PR 7' prompt (no hash, no review prefix)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "PR 7" })).toBe(true)
+  })
+
+  it("returns false for bare numeric prompt '7' (ambiguous, not a PR ref)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "7" })).toBe(false)
+  })
+
+  it("returns false for 'Review 7' (bare numeric, not a PR ref)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review 7" })).toBe(false)
+  })
+
+  it("returns false for 'Review branch 7' (numeric branch name)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review branch 7" })).toBe(false)
   })
 
   it("returns true for 'Review branch <name>' natural prompt", () => {
