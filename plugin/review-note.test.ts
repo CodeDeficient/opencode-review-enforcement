@@ -50,6 +50,14 @@ describe("extractSha", () => {
   it("returns null when hex is preceded by # (PR ref)", () => {
     expect(extractSha("#1234567")).toBeNull()
   })
+
+  it("returns null when hex is preceded by PR (explicit PR ref)", () => {
+    expect(extractSha("PR 1234567")).toBeNull()
+  })
+
+  it("returns null when hex is preceded by PR in natural prompt", () => {
+    expect(extractSha("Review PR 1234567")).toBeNull()
+  })
 })
 
 describe("extractPrNumber", () => {
@@ -293,6 +301,19 @@ describe("resolveTargetSha", () => {
 
     expect(result.sha).toBe("prsha_review")
     expect(result.source).toBe("PR #7")
+  })
+
+  it("resolves 'Review PR 1234567' as PR, not SHA, even when rev-parse succeeds", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "1234567" ? ok("sha1234567") : ref === "HEAD" ? ok("headsha") : fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_7digit" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetSha("Review PR 1234567", deps)
+
+    expect(result.sha).toBe("prsha_7digit")
+    expect(result.source).toBe("PR #1234567")
   })
 
   it("extracts SHA from prompt content in searchText", async () => {

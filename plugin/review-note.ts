@@ -18,10 +18,15 @@ export function extractPrNumber(text: string): string | null {
   return match ? match[1] : null
 }
 
-/** Extract a bare 7–40 char hex SHA from a string, rejecting #-prefixed hex (PR refs). */
+/** Extract a bare 7–40 char hex SHA from a string, rejecting #-prefixed hex (PR refs) and PR-prefixed decimals. */
 export function extractSha(text: string): string | null {
-  const match = text.match(/(?<!#)\b([0-9a-f]{7,40})\b/i)
-  return match ? match[1] : null
+  const regex = /(?<!#)\b([0-9a-f]{7,40})\b/gi
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(text)) !== null) {
+    const before = text.slice(0, match.index).trimEnd()
+    if (!/PR$/i.test(before)) return match[1]
+  }
+  return null
 }
 
 export function isReviewTask(args: { command?: string; subagent_type?: string }): boolean {
