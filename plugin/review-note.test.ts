@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test"
-import { extractSha, extractPrNumber, isReviewTask, resolveTargetSha, type ResolverDeps, type RunResult } from "./review-note"
+import { extractSha, extractPrNumber, isReviewTask, resolveTargetSha, resolveTargetShaFromArgs, type ResolverDeps, type RunResult } from "./review-note"
 
 function ok(stdout: string): RunResult {
   return { stdout, stderr: "", exitCode: 0 }
@@ -367,6 +367,138 @@ describe("resolveTargetSha", () => {
 
     expect(result.sha).toBe("fullpromptsha")
     expect(result.source).toBe("sha:def5678")
+  })
+})
+
+describe("resolveTargetShaFromArgs", () => {
+  it("resolves PR 7 from prompt when description is generic", async () => {
+    const deps: ResolverDeps = {
+      revParse: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_from_prompt" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "code review", prompt: "PR 7", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("prsha_from_prompt")
+    expect(result.source).toBe("PR #7")
+  })
+
+  it("resolves #7 from prompt when description is generic", async () => {
+    const deps: ResolverDeps = {
+      revParse: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_hashprompt" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "code review", prompt: "#7", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("prsha_hashprompt")
+    expect(result.source).toBe("PR #7")
+  })
+
+  it("does not resolve incidental PR 8 in description", async () => {
+    let prViewCalled = false
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "HEAD" ? ok("headsha") : fail(),
+      prView: async () => { prViewCalled = true; return ok(JSON.stringify({ headRefOid: "prsha" })) },
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "Reviewing PR 8 changes", prompt: "", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("headsha")
+    expect(result.source).toBe("HEAD")
+    expect(prViewCalled).toBe(false)
+  })
+
+  it("resolves SHA from prompt when description is generic", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "abc1234" ? ok("fullsha") : fail(),
+      prView: async () => fail(),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "code review", prompt: "abc1234", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("fullsha")
+    expect(result.source).toBe("sha:abc1234")
+  })
+
+  it("resolves from /review command prompt with Input: prefix", async () => {
+    const deps: ResolverDeps = {
+      revParse: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_input" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "", prompt: "Input: #7", command: "review" },
+      deps,
+    )
+
+    expect(result.sha).toBe("prsha_input")
+    expect(result.source).toBe("PR #7")
+  })
+
+  it("resolves SHA from description when description is itself a target selector", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "def5678" ? ok("fullsha_desc") : fail(),
+      prView: async () => fail(),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "review commit def5678", prompt: "", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("fullsha_desc")
+    expect(result.source).toBe("sha:def5678")
+  })
+
+  it("falls back to HEAD when no target found in any field", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "HEAD" ? ok("headsha") : fail(),
+      prView: async () => fail(),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "code review", prompt: "", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("headsha")
+    expect(result.source).toBe("HEAD")
+  })
+
+  it("resolves PR 7 from prompt even when description contains incidental PR 8", async () => {
+    const deps: ResolverDeps = {
+      revParse: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_correct" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "Reviewing PR 8 changes", prompt: "PR 7", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("prsha_correct")
+    expect(result.source).toBe("PR #7")
   })
 })
 

@@ -144,6 +144,105 @@ export async function resolveTargetSha(
   return { sha, source }
 }
 
+export async function resolveTargetShaFromArgs(
+  args: { description?: string; prompt?: string; command?: string },
+  deps: ResolverDeps,
+): Promise<{ sha: string | null; source: string }> {
+  const description = args.description ?? ""
+  const prompt = args.prompt ?? ""
+  const command = args.command ?? ""
+
+  const tryResolve = async (text: string): Promise<{ sha: string | null; source: string } | null> => {
+    const hexSha = extractSha(text)
+    if (hexSha) {
+      const result = await deps.revParse(hexSha)
+      if (result.exitCode === 0) {
+        return { sha: result.stdout.trim() || null, source: `sha:${hexSha}` }
+      }
+      deps.log("warn", `rev-parse failed for SHA ${hexSha} (exit ${result.exitCode})`)
+    }
+
+    const prNum = extractPrNumber(text)
+    if (prNum) {
+      const result = await deps.prView(prNum)
+      if (result.exitCode === 0) {
+        try {
+          const json = JSON.parse(result.stdout)
+          if (json.headRefOid) {
+            return { sha: json.headRefOid, source: `PR #${prNum}` }
+          }
+          deps.log("warn", `PR #${prNum} returned null headRefOid`)
+        } catch {
+          deps.log("warn", `Failed to parse gh pr view output for PR #${prNum}`)
+        }
+      } else {
+        deps.log("warn", `gh pr view failed for PR #${prNum} (exit ${result.exitCode})`)
+      }
+    }
+
+    return null
+  }
+
+  const isTargetSelector = (text: string): boolean => {
+    const trimmed = text.trim()
+    if (!trimmed) return false
+    if (/^(?:review\s+)?(?:commit\s+)?[0-9a-f]{7,40}$/i.test(trimmed)) return true
+    if (/^(?:review\s+)?(?:PR\s+)?#\d+$/i.test(trimmed)) return true
+    if (/^(?:review\s+)?PR\s+\d+$/i.test(trimmed)) return true
+    if (/^review\s+branch\s+[\w\-.\\/]+$/i.test(trimmed)) return true
+    if (/^[\w\-.\\/]+$/.test(trimmed) && trimmed.length <= 100 && !/^\d+$/.test(trimmed)) return true
+    return false
+  }
+
+  if (prompt && isTargetSelector(prompt)) {
+    const result = await tryResolve(prompt)
+    if (result) return result
+  }
+
+  if (command === "review" && prompt.startsWith("Input:")) {
+    const target = prompt.slice("Input:".length).trim()
+    if (target) {
+      const result = await tryResolve(target)
+      if (result) return result
+    }
+  }
+
+  if (description && isTargetSelector(description)) {
+    const result = await tryResolve(description)
+    if (result) return result
+  }
+
+  const combined = `${description} ${prompt} ${command}`
+  const combinedSha = extractSha(combined)
+  if (combinedSha) {
+    const result = await deps.revParse(combinedSha)
+    if (result.exitCode === 0) {
+      return { sha: result.stdout.trim() || null, source: `sha:${combinedSha}` }
+    }
+  }
+
+  const combinedPr = extractPrNumber(combined)
+  if (combinedPr) {
+    const result = await deps.prView(combinedPr)
+    if (result.exitCode === 0) {
+      try {
+        const json = JSON.parse(result.stdout)
+        if (json.headRefOid) {
+          return { sha: json.headRefOid, source: `PR #${combinedPr}` }
+        }
+      } catch {}
+    }
+  }
+
+  deps.log("info", "Falling back to HEAD")
+  const result = await deps.revParse("HEAD")
+  if (result.exitCode === 0) {
+    return { sha: result.stdout.trim() || null, source: "HEAD" }
+  }
+
+  return { sha: null, source: "" }
+}
+
 export default (async ({ $, client }) => {
   return {
     "tool.execute.after": async (input: any, output: any) => {
@@ -162,10 +261,6 @@ export default (async ({ $, client }) => {
       }
 
       const reviewText = output?.output ?? ""
-      const description = args.description ?? ""
-      const prompt = args.prompt ?? ""
-      const command = args.command ?? ""
-      const searchText = `${description} ${prompt} ${command}`
 
       const deps: ResolverDeps = {
         revParse: async (ref) => {
@@ -180,7 +275,7 @@ export default (async ({ $, client }) => {
       }
 
       try {
-        const { sha, source } = await resolveTargetSha(searchText, deps)
+        const { sha, source } = await resolveTargetShaFromArgs(args, deps)
 
         if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) {
           log(client, "warn", `Could not resolve a valid SHA (source=${source}, sha=${sha ?? "null"})`)
