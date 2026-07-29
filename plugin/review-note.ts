@@ -28,6 +28,36 @@ export function isReviewTask(args: { command?: string; subagent_type?: string })
   return args.command === "review" || args.command?.startsWith("review ") === true || args.subagent_type === "reviewer"
 }
 
+export function isCanonicalReviewInvocation(args: {
+  command?: string
+  subagent_type?: string
+  prompt?: string
+}): boolean {
+  if (args.command === "review" || args.command?.startsWith("review ") === true) {
+    return true
+  }
+
+  if (args.subagent_type !== "reviewer") {
+    return false
+  }
+
+  return isTargetOnlyPrompt(args.prompt ?? "")
+}
+
+function isTargetOnlyPrompt(prompt: string): boolean {
+  const trimmed = prompt.trim()
+  if (!trimmed) return false
+  if (trimmed.includes("\n")) return false
+
+  if (/^[0-9a-f]{7,40}$/i.test(trimmed)) return true
+
+  if (/^(PR\s+)?#\d+$/i.test(trimmed)) return true
+
+  if (trimmed.length <= 100 && /^[\w\-.\\/]+$/.test(trimmed)) return true
+
+  return false
+}
+
 export type RunResult = {
   stdout: string
   stderr: string
@@ -104,8 +134,10 @@ export default (async ({ $, client }) => {
         subagent_type?: string
       }
 
-      const isReview = isReviewTask(args)
-      if (!isReview) return
+      if (!isCanonicalReviewInvocation(args)) {
+        log(client, "info", "Skipped review note for non-canonical reviewer invocation")
+        return
+      }
 
       const reviewText = output?.output ?? ""
       const description = args.description ?? ""

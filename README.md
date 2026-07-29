@@ -18,7 +18,7 @@ flowchart LR
 ```
 
 1. **Commit** — Make your changes and commit
-2. **Review** — Run `/review <sha>` in OpenCode TUI, or let your agent spawn a reviewer subagent
+2. **Review** — Run `/review <sha>` in OpenCode TUI. Agents may also spawn a reviewer subagent using a target-only prompt (see agent-initiated section)
 3. **Attach** — The plugin automatically attaches the review output as a git note to the commit
 4. **Gate** — The pre-push hook checks every commit in the push range for a review note
 5. **Push** — All reviewed → push allowed. Missing reviews → push blocked
@@ -83,7 +83,9 @@ task(
 )
 ```
 
-The plugin detects the `subagent_type: "reviewer"` and attaches the note automatically.
+Only target-only prompts (SHA, PR ref, branch name) produce enforcement-grade notes. Reviewer subagent invocations with custom review methodology, focus areas, or output format instructions will still run but the plugin will **not** attach a review note.
+
+The plugin validates the invocation as canonical before attaching the note — this is the enforcement boundary. Prompt hints to the model are defense-in-depth only.
 
 ### PR reviews
 
@@ -121,7 +123,13 @@ The plugin uses `Reviewed-by: opencode-review-subagent` as the marker in git not
 
 ## How the Plugin Works
 
-The plugin hooks into OpenCode's `tool.execute.after` event. When a `task` tool call completes with `subagent_type: "reviewer"` or `command: "review"` / `"review <args>"`, it resolves the target commit in this priority order:
+The plugin hooks into OpenCode's `tool.execute.after` event. When a task tool call completes, it first checks whether the invocation is canonical (enforcement-grade):
+
+- `/review <target>` command → always canonical
+- Reviewer subagent with a target-only prompt → canonical
+- Reviewer subagent with custom methodology or instructions → **non-canonical** (runs but no note)
+
+Canonical invocations resolve the target commit in this priority order:
 
 1. **Explicit SHA** — Extracted from the task's `description`, `prompt`, or `command` fields (e.g., `"review commit abc1234"`). When both a SHA and PR number are present, the SHA wins because it identifies a specific commit, unlike a PR reference which resolves to the PR's mutable head.
 2. **PR number** — Extracted from the same fields (e.g., `"#742"`). Resolved to the PR's `headRefOid` via `gh pr view`.
