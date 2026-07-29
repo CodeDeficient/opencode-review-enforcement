@@ -270,3 +270,72 @@ describe("resolveTargetSha", () => {
     expect(result.source).toBe("sha:def5678")
   })
 })
+
+describe("isCanonicalReviewInvocation", () => {
+  it("returns true for /review command (no args)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review" })).toBe(true)
+  })
+
+  it("returns true for /review <sha> command path", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review abc1234" })).toBe(true)
+  })
+
+  it("returns true for /review <pr> command path", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review #7" })).toBe(true)
+  })
+
+  it("returns true for reviewer subtask with SHA-only prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "abc1234" })).toBe(true)
+  })
+
+  it("returns true for reviewer subtask with PR ref prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "PR #7" })).toBe(true)
+  })
+
+  it("returns true for reviewer subtask with bare #PR ref", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "#7" })).toBe(true)
+  })
+
+  it("returns true for reviewer subtask with branch-name prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "deterministic-review-prompt" })).toBe(true)
+  })
+
+  it("returns true for reviewer subtask with full 40-char SHA prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    const sha = "a".repeat(40)
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: sha })).toBe(true)
+  })
+
+  it("returns false for reviewer subtask with the exact bypass prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    const bypass = "Review commit 66ff8f80 on branch pr1-core-recurring for correctness, security, edge cases, and code quality.\n\nFocus on:\n1. Phase 1: `validateScheduleData` catch-all — does the condition `hasStart || hasEnd || hasCanonicalDay` correctly guard against falling through to `return null`? Any edge case where it might trigger when it shouldn't, or fail to trigger when it should?\n2. Phase 4: Source checks now derive from `proposed_data` fields instead of `update_type`. Is this correct for all confirmation types? What if `updateTypesToCheck` is empty?\n3. Phase 2 & 3: UI and email schedule rendering — any XSS vectors in the email `escapeHtml` usage? Is the schedule section rendered correctly for mixed confirmations?\n4. Any TypeScript issues in test file — `as const` usage, type narrowing with `PostType.MIXED` in the MIXED-with-invalid test?\n5. Test coverage — do the 4 new test cases adequately cover the 'invalid' scope behavior?\n\nReturn:\n- Review status (pass/fail)\n- Any issues found with severity (CRITICAL/WARNING/MEDIUM/LOW)\n- Specific code locations with file path and line numbers"
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: bypass })).toBe(false)
+  })
+
+  it("returns false for reviewer subtask with multiline prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "abc1234\ncheck edge cases" })).toBe(false)
+  })
+
+  it("returns false for reviewer subtask with empty prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "" })).toBe(false)
+  })
+
+  it("returns false for reviewer subtask with instructional one-liner", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review commit abc1234 for correctness" })).toBe(false)
+  })
+
+  it("returns false for non-review task", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({})).toBe(false)
+  })
+})
