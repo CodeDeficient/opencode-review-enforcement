@@ -12,9 +12,9 @@ function log(client: unknown, level: LogLevel, message: string): void {
   })
 }
 
-/** Extract a PR number (#NNN or PR NNN) from a string. */
+/** Extract a PR number (#NNN or explicit PR NNN target selector) from a string. */
 export function extractPrNumber(text: string): string | null {
-  const match = text.match(/#(\d+)/) || text.match(/(?:^|\s)PR\s+(\d+)\b/i)
+  const match = text.match(/#(\d+)/) || text.trim().match(/^(?:review\s+)?PR\s+(\d+)\b/i)
   return match ? match[1] : null
 }
 

@@ -96,6 +96,18 @@ describe("extractPrNumber", () => {
   it("extracts PR number from 'PR #7' with hash", () => {
     expect(extractPrNumber("PR #7")).toBe("7")
   })
+
+  it("returns null for incidental 'PR NNN' in prose (not a target selector)", () => {
+    expect(extractPrNumber("Reviewing PR 8 changes")).toBeNull()
+  })
+
+  it("returns null for 'PR NNN' preceded by non-review word", () => {
+    expect(extractPrNumber("check PR 7")).toBeNull()
+  })
+
+  it("returns null for 'PR NNN' in middle of sentence", () => {
+    expect(extractPrNumber("Please review PR 8")).toBeNull()
+  })
 })
 
 describe("isReviewTask", () => {
@@ -314,6 +326,34 @@ describe("resolveTargetSha", () => {
 
     expect(result.sha).toBe("prsha_7digit")
     expect(result.source).toBe("PR #1234567")
+  })
+
+  it("does not resolve incidental 'PR NNN' in prose as a PR ref", async () => {
+    let prViewCalled = false
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "HEAD" ? ok("headsha") : fail(),
+      prView: async () => { prViewCalled = true; return ok(JSON.stringify({ headRefOid: "prsha" })) },
+      log: () => {},
+    }
+
+    const result = await resolveTargetSha("Reviewing PR 8 changes", deps)
+
+    expect(result.sha).toBe("headsha")
+    expect(result.source).toBe("HEAD")
+    expect(prViewCalled).toBe(false)
+  })
+
+  it("resolves 'PR 7' from concatenated searchText with leading spaces (simulates real plugin flow)", async () => {
+    const deps: ResolverDeps = {
+      revParse: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_trim" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetSha("  review PR 7", deps)
+
+    expect(result.sha).toBe("prsha_trim")
+    expect(result.source).toBe("PR #7")
   })
 
   it("extracts SHA from prompt content in searchText", async () => {
