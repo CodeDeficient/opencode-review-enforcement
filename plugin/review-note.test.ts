@@ -705,4 +705,30 @@ describe("isCanonicalReviewInvocation", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
     expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: review commit def5678" })).toBe(true)
   })
+
+  it("returns false for /review command with Input: containing custom prose", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: Review commit abc1234 for correctness" })).toBe(false)
+  })
+
+  it("returns false for /review command with Input: containing multiline prose", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: abc1234\ncheck edge cases" })).toBe(false)
+  })
+
+  it("returns false for /review command with Input: containing long prose", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    const long = "Input: " + "a".repeat(101)
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: long })).toBe(false)
+  })
+
+  it("returns false for /review command with Input: containing instructional text", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: Please review commit abc1234 for bugs" })).toBe(false)
+  })
+
+  it("returns false for /review command with Input: containing focus areas", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: abc1234 focus on security" })).toBe(false)
+  })
 })

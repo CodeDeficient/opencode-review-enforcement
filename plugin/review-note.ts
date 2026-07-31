@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 
 const REVIEW_MARKER = "Reviewed-by: opencode-review-subagent"
+const REVIEW_NOTES_REF = "reviews"
 const SERVICE = "review-note-plugin"
 
 export type LogLevel = "info" | "warn" | "error"
@@ -40,7 +41,17 @@ export function isCanonicalReviewInvocation(args: {
 }): boolean {
   if (args.command === "review" || args.command?.startsWith("review ") === true) {
     const prompt = (args.prompt ?? "").trim()
-    return prompt.startsWith("Input:")
+    if (!prompt.startsWith("Input:")) return false
+    const afterInput = prompt.slice("Input:".length).trim()
+    if (!afterInput) return true
+    if (afterInput.includes("\n")) return false
+    if (afterInput.length > 100) return false
+    if (/^[\w\-.\\/#]+$/.test(afterInput)) return true
+    if (/^(?:review\s+)?(?:commit\s+)?[0-9a-f]{7,40}$/i.test(afterInput)) return true
+    if (/^(?:review\s+)?(?:PR\s+)?#\d+$/i.test(afterInput)) return true
+    if (/^(?:review\s+)?PR\s+\d+$/i.test(afterInput)) return true
+    if (/^review\s+branch\s+[\w\-.\\/]+$/i.test(afterInput)) return true
+    return false
   }
 
   if (args.subagent_type !== "reviewer") {
@@ -287,7 +298,7 @@ export default (async ({ $, client }) => {
         const status = hasIssues ? "failed" : "passed"
         const note = `${REVIEW_MARKER}\nReview-Status: ${status}\n\n${reviewText}`
 
-        await $`git notes add -f -m ${note} ${sha}`.quiet()
+        await $`git notes --ref=${REVIEW_NOTES_REF} add -f -m ${note} ${sha}`.quiet()
         log(client, "info", `Attached review note (${status}) to ${sha.slice(0, 7)} (source=${source})`)
       } catch (error) {
         log(client, "error", `Failed to attach review note: ${error instanceof Error ? error.message : String(error)}`)

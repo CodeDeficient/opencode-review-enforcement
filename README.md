@@ -117,6 +117,12 @@ The reviewer subagent (`agent/reviewer.md`) has restricted permissions — read-
 
 The plugin uses `Reviewed-by: opencode-review-subagent` as the marker in git notes. The pre-push hook checks for this exact string. Change it in both `plugin/review-note.ts` and `hooks/pre-push-review-enforcement.sh` if needed.
 
+### Private notes ref
+
+Review notes are stored in a private git notes ref (`refs/notes/reviews`) — NOT the default `refs/notes/commits`. This prevents review notes from appearing in `git log` or `git show` output, which would leak review content into the reviewer subagent's context. The pre-push hook reads from the same private ref.
+
+Do not change the notes ref without updating both the plugin and the hook.
+
 ## Requirements
 
 - **OpenCode** 1.17+ (plugin API v1)
