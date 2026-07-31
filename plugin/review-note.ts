@@ -30,10 +30,6 @@ export function extractSha(text: string): string | null {
   return null
 }
 
-export function isReviewTask(args: { command?: string; subagent_type?: string }): boolean {
-  return args.command === "review" || args.command?.startsWith("review ") === true || args.subagent_type === "reviewer"
-}
-
 export function isCanonicalReviewInvocation(args: {
   command?: string
   subagent_type?: string
@@ -103,58 +99,6 @@ export interface ResolverDeps {
   log(level: LogLevel, message: string): void
 }
 
-export async function resolveTargetSha(
-  searchText: string,
-  deps: ResolverDeps,
-): Promise<{ sha: string | null; source: string }> {
-  let sha: string | null = null
-  let source = ""
-
-  const hexSha = extractSha(searchText)
-  if (hexSha) {
-    deps.log("info", `Found SHA ${hexSha}, resolving to full hash`)
-    const result = await deps.revParse(hexSha)
-    if (result.exitCode === 0) {
-      sha = result.stdout.trim() || null
-      source = `sha:${hexSha}`
-    } else {
-      deps.log("warn", `git rev-parse failed for ${hexSha} (exit ${result.exitCode}), falling through`)
-    }
-  }
-
-  if (!sha) {
-    const prNum = extractPrNumber(searchText)
-    if (prNum) {
-      deps.log("info", `Found PR #${prNum}, resolving headRefOid`)
-      const result = await deps.prView(prNum)
-      if (result.exitCode === 0) {
-        try {
-          const json = JSON.parse(result.stdout)
-          sha = json.headRefOid ?? null
-          source = `PR #${prNum}`
-        } catch {
-          deps.log("warn", `Failed to parse gh pr view output for PR #${prNum}, falling through to HEAD`)
-        }
-      } else {
-        deps.log("warn", `gh pr view failed for PR #${prNum} (exit ${result.exitCode}), falling through to HEAD`)
-      }
-    }
-  }
-
-  if (!sha) {
-    deps.log("info", "Falling back to HEAD")
-    const result = await deps.revParse("HEAD")
-    if (result.exitCode === 0) {
-      sha = result.stdout.trim() || null
-      source = "HEAD"
-    } else {
-      deps.log("warn", `git rev-parse HEAD failed (exit ${result.exitCode})`)
-    }
-  }
-
-  return { sha, source }
-}
-
 export async function resolveTargetShaFromArgs(
   args: { description?: string; prompt?: string; command?: string },
   deps: ResolverDeps,
@@ -164,6 +108,7 @@ export async function resolveTargetShaFromArgs(
   const command = args.command ?? ""
 
   const tryResolve = async (text: string): Promise<{ sha: string | null; source: string } | null> => {
+    const trimmed = text.trim()
     const hexSha = extractSha(text)
     if (hexSha) {
       const result = await deps.revParse(hexSha)
@@ -191,6 +136,16 @@ export async function resolveTargetShaFromArgs(
       }
     }
 
+    const branchMatch = trimmed.match(/^(?:review\s+branch\s+)([\w\-.\\/]+)$/i)
+    if (branchMatch) {
+      const branch = branchMatch[1]
+      const result = await deps.revParse(branch)
+      if (result.exitCode === 0) {
+        return { sha: result.stdout.trim() || null, source: `branch:${branch}` }
+      }
+      deps.log("warn", `rev-parse failed for branch ${branch} (exit ${result.exitCode})`)
+    }
+
     return null
   }
 
@@ -204,22 +159,32 @@ export async function resolveTargetShaFromArgs(
     return false
   }
 
+  let hadTargetSelector = false
+
   if (prompt && isTargetSelector(prompt)) {
+    hadTargetSelector = true
     const result = await tryResolve(prompt)
     if (result) return result
   }
 
-  if (command === "review" && prompt.startsWith("Input:")) {
-    const target = prompt.slice("Input:".length).trim()
+  if ((command === "review" || command.startsWith("review ")) && prompt.trim().startsWith("Input:")) {
+    const target = prompt.trim().slice("Input:".length).trim()
     if (target) {
+      hadTargetSelector = true
       const result = await tryResolve(target)
       if (result) return result
     }
   }
 
   if (description && isTargetSelector(description)) {
+    hadTargetSelector = true
     const result = await tryResolve(description)
     if (result) return result
+  }
+
+  if (hadTargetSelector) {
+    deps.log("warn", "Target selector identified but did not resolve; not falling back to HEAD or combined search")
+    return { sha: null, source: "" }
   }
 
   const combined = `${description} ${prompt} ${command}`

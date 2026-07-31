@@ -85,7 +85,7 @@ task(
 )
 ```
 
-Only target-only prompts (SHA, PR ref, branch name) produce enforcement-grade notes. Reviewer subagent invocations with custom review methodology, focus areas, or output format instructions will still run but the plugin will **not** attach a review note.
+Only target-only prompts (SHA, PR ref, or `review branch <name>` for branches) produce enforcement-grade notes. Bare branch names are not accepted — they must use the explicit `review branch` prefix. Reviewer subagent invocations with custom review methodology, focus areas, or output format instructions will still run but the plugin will **not** attach a review note.
 
 The plugin validates the invocation as canonical before attaching the note — this is the enforcement boundary. Prompt hints to the model are defense-in-depth only.
 
@@ -133,7 +133,7 @@ Do not change the notes ref without updating both the plugin and the hook.
 
 The plugin hooks into OpenCode's `tool.execute.after` event. When a task tool call completes, it first checks whether the invocation is canonical (enforcement-grade):
 
-- `/review <target>` command → always canonical
+- `/review <target>` command → canonical when the target is a bare SHA, PR ref, or `review branch <name>` (prose after the target is non-canonical)
 - Reviewer subagent with a target-only prompt → canonical
 - Reviewer subagent with custom methodology or instructions → **non-canonical** (runs but no note)
 
@@ -141,8 +141,9 @@ Canonical invocations resolve the target commit in this priority order:
 
 1. **Explicit SHA** — Extracted from the task's `description`, `prompt`, or `command` fields (e.g., `"review commit abc1234"`). When both a SHA and PR number are present, the SHA wins because it identifies a specific commit, unlike a PR reference which resolves to the PR's mutable head.
 2. **PR number** — Extracted from the same fields (e.g., `"#742"`). Resolved to the PR's `headRefOid` via `gh pr view`.
-3. **HEAD** — Falls back to `git rev-parse HEAD` if neither SHA nor PR number is found.
-4. **Attaches** the review output as a git note with the marker and review status.
+3. **Branch** — `review branch <name>` resolves to the branch tip via `git rev-parse <name>`. If the branch does not exist, no note is attached (no HEAD fallback).
+4. **HEAD** — Falls back to `git rev-parse HEAD` only when no target was specified.
+5. **Attaches** the review output as a git note with the marker and review status.
 
 ## Files
 
