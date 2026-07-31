@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 
 const REVIEW_MARKER = "Reviewed-by: opencode-review-subagent"
+const REVIEW_NOTES_REF = "reviews"
 const SERVICE = "review-note-plugin"
 
 export type LogLevel = "info" | "warn" | "error"
@@ -12,20 +13,21 @@ function log(client: unknown, level: LogLevel, message: string): void {
   })
 }
 
-/** Extract a PR number (#NNN) from a string. */
+/** Extract a PR number (#NNN or explicit PR NNN target selector) from a string. */
 export function extractPrNumber(text: string): string | null {
-  const match = text.match(/#(\d+)/)
+  const match = text.match(/#(\d+)/) || text.trim().match(/^(?:review\s+)?PR\s+(\d+)\b/i)
   return match ? match[1] : null
 }
 
-/** Extract a bare 7–40 char hex SHA from a string, rejecting #-prefixed hex (PR refs). */
+/** Extract a bare 7–40 char hex SHA from a string, rejecting #-prefixed hex (PR refs) and PR-prefixed decimals. */
 export function extractSha(text: string): string | null {
-  const match = text.match(/(?<!#)\b([0-9a-f]{7,40})\b/i)
-  return match ? match[1] : null
-}
-
-export function isReviewTask(args: { command?: string; subagent_type?: string }): boolean {
-  return args.command === "review" || args.command?.startsWith("review ") === true || args.subagent_type === "reviewer"
+  const regex = /(?<!#)\b([0-9a-f]{7,40})\b/gi
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(text)) !== null) {
+    const before = text.slice(0, match.index).trimEnd()
+    if (!/pr[\W_]*$/i.test(before)) return match[1]
+  }
+  return null
 }
 
 export function isCanonicalReviewInvocation(args: {
@@ -34,7 +36,17 @@ export function isCanonicalReviewInvocation(args: {
   prompt?: string
 }): boolean {
   if (args.command === "review" || args.command?.startsWith("review ") === true) {
-    return true
+    const prompt = (args.prompt ?? "").trim()
+    if (!prompt.startsWith("Input:")) return false
+    const afterInput = prompt.slice("Input:".length).trim()
+    if (!afterInput) return true
+    if (afterInput.includes("\n")) return false
+    if (afterInput.length > 100) return false
+    if (/^(?:review\s+)?(?:commit\s+)?[0-9a-f]{7,40}$/i.test(afterInput)) return true
+    if (/^(?:review\s+)?(?:PR\s+)?#\d+$/i.test(afterInput)) return true
+    if (/^(?:review\s+)?PR\s+\d+$/i.test(afterInput)) return true
+    if (/^review\s+branch\s+[\w\-.\\/]+$/i.test(afterInput)) return true
+    return false
   }
 
   if (args.subagent_type !== "reviewer") {
@@ -49,13 +61,30 @@ function isTargetOnlyPrompt(prompt: string): boolean {
   if (!trimmed) return false
   if (trimmed.includes("\n")) return false
 
-  if (/^[0-9a-f]{7,40}$/i.test(trimmed)) return true
+  const target = stripTargetSelectorPrefix(trimmed)
+  if (!target) return false
 
-  if (/^(PR\s+)?#\d+$/i.test(trimmed)) return true
+  if (/^[0-9a-f]{7,40}$/i.test(target)) return true
 
-  if (trimmed.length <= 100 && /^[\w\-.\\/]+$/.test(trimmed)) return true
+  if (/^(PR\s+)?#\d+$/i.test(target)) return true
+  if (/^PR\s+\d+$/i.test(target)) return true
+
+  if (/^\d+$/.test(target)) return false
+
+  if (/^review\s+branch\s+/i.test(trimmed) && target.length <= 100 && /^[\w\-.\\/]+$/.test(target)) return true
 
   return false
+}
+
+function stripTargetSelectorPrefix(text: string): string {
+  const lower = text.toLowerCase()
+  const prefixes = ["review commit ", "review branch ", "review "]
+  for (const prefix of prefixes) {
+    if (lower.startsWith(prefix)) {
+      return text.slice(prefix.length).trim()
+    }
+  }
+  return text
 }
 
 export type RunResult = {
@@ -70,56 +99,125 @@ export interface ResolverDeps {
   log(level: LogLevel, message: string): void
 }
 
-export async function resolveTargetSha(
-  searchText: string,
+export async function resolveTargetShaFromArgs(
+  args: { description?: string; prompt?: string; command?: string },
   deps: ResolverDeps,
 ): Promise<{ sha: string | null; source: string }> {
-  let sha: string | null = null
-  let source = ""
+  const description = args.description ?? ""
+  const prompt = args.prompt ?? ""
+  const command = args.command ?? ""
 
-  const hexSha = extractSha(searchText)
-  if (hexSha) {
-    deps.log("info", `Found SHA ${hexSha}, resolving to full hash`)
-    const result = await deps.revParse(hexSha)
-    if (result.exitCode === 0) {
-      sha = result.stdout.trim() || null
-      source = `sha:${hexSha}`
-    } else {
-      deps.log("warn", `git rev-parse failed for ${hexSha} (exit ${result.exitCode}), falling through`)
+  const tryResolve = async (text: string): Promise<{ sha: string | null; source: string } | null> => {
+    const trimmed = text.trim()
+
+    const branchMatch = trimmed.match(/^(?:review\s+branch\s+)([\w\-.\\/]+)$/i)
+    if (branchMatch) {
+      const branch = branchMatch[1]
+      const result = await deps.revParse(branch)
+      if (result.exitCode === 0) {
+        return { sha: result.stdout.trim() || null, source: `branch:${branch}` }
+      }
+      deps.log("warn", `rev-parse failed for branch ${branch} (exit ${result.exitCode})`)
+      return null
     }
-  }
 
-  if (!sha) {
-    const prNum = extractPrNumber(searchText)
+    const hexSha = extractSha(text)
+    if (hexSha) {
+      const result = await deps.revParse(hexSha)
+      if (result.exitCode === 0) {
+        return { sha: result.stdout.trim() || null, source: `sha:${hexSha}` }
+      }
+      deps.log("warn", `rev-parse failed for SHA ${hexSha} (exit ${result.exitCode})`)
+    }
+
+    const prNum = extractPrNumber(text)
     if (prNum) {
-      deps.log("info", `Found PR #${prNum}, resolving headRefOid`)
       const result = await deps.prView(prNum)
       if (result.exitCode === 0) {
         try {
           const json = JSON.parse(result.stdout)
-          sha = json.headRefOid ?? null
-          source = `PR #${prNum}`
+          if (json.headRefOid) {
+            return { sha: json.headRefOid, source: `PR #${prNum}` }
+          }
+          deps.log("warn", `PR #${prNum} returned null headRefOid`)
         } catch {
-          deps.log("warn", `Failed to parse gh pr view output for PR #${prNum}, falling through to HEAD`)
+          deps.log("warn", `Failed to parse gh pr view output for PR #${prNum}`)
         }
       } else {
-        deps.log("warn", `gh pr view failed for PR #${prNum} (exit ${result.exitCode}), falling through to HEAD`)
+        deps.log("warn", `gh pr view failed for PR #${prNum} (exit ${result.exitCode})`)
       }
     }
+
+    return null
   }
 
-  if (!sha) {
-    deps.log("info", "Falling back to HEAD")
-    const result = await deps.revParse("HEAD")
-    if (result.exitCode === 0) {
-      sha = result.stdout.trim() || null
-      source = "HEAD"
-    } else {
-      deps.log("warn", `git rev-parse HEAD failed (exit ${result.exitCode})`)
+  const isTargetSelector = (text: string): boolean => {
+    const trimmed = text.trim()
+    if (!trimmed) return false
+    if (/^(?:review\s+)?(?:commit\s+)?[0-9a-f]{7,40}$/i.test(trimmed)) return true
+    if (/^(?:review\s+)?(?:PR\s+)?#\d+$/i.test(trimmed)) return true
+    if (/^(?:review\s+)?PR\s+\d+$/i.test(trimmed)) return true
+    if (/^review\s+branch\s+[\w\-.\\/]+$/i.test(trimmed)) return true
+    return false
+  }
+
+  let hadTargetSelector = false
+
+  if (prompt && isTargetSelector(prompt)) {
+    hadTargetSelector = true
+    const result = await tryResolve(prompt)
+    if (result) return result
+  }
+
+  if ((command === "review" || command.startsWith("review ")) && prompt.trim().startsWith("Input:")) {
+    const target = prompt.trim().slice("Input:".length).trim()
+    if (target) {
+      hadTargetSelector = true
+      const result = await tryResolve(target)
+      if (result) return result
     }
   }
 
-  return { sha, source }
+  if (description && isTargetSelector(description)) {
+    hadTargetSelector = true
+    const result = await tryResolve(description)
+    if (result) return result
+  }
+
+  if (hadTargetSelector) {
+    deps.log("warn", "Target selector identified but did not resolve; not falling back to HEAD or combined search")
+    return { sha: null, source: "" }
+  }
+
+  const combined = `${description} ${prompt} ${command}`
+  const combinedSha = extractSha(combined)
+  if (combinedSha) {
+    const result = await deps.revParse(combinedSha)
+    if (result.exitCode === 0) {
+      return { sha: result.stdout.trim() || null, source: `sha:${combinedSha}` }
+    }
+  }
+
+  const combinedPr = extractPrNumber(combined)
+  if (combinedPr) {
+    const result = await deps.prView(combinedPr)
+    if (result.exitCode === 0) {
+      try {
+        const json = JSON.parse(result.stdout)
+        if (json.headRefOid) {
+          return { sha: json.headRefOid, source: `PR #${combinedPr}` }
+        }
+      } catch {}
+    }
+  }
+
+  deps.log("info", "Falling back to HEAD")
+  const result = await deps.revParse("HEAD")
+  if (result.exitCode === 0) {
+    return { sha: result.stdout.trim() || null, source: "HEAD" }
+  }
+
+  return { sha: null, source: "" }
 }
 
 export default (async ({ $, client }) => {
@@ -140,10 +238,6 @@ export default (async ({ $, client }) => {
       }
 
       const reviewText = output?.output ?? ""
-      const description = args.description ?? ""
-      const prompt = args.prompt ?? ""
-      const command = args.command ?? ""
-      const searchText = `${description} ${prompt} ${command}`
 
       const deps: ResolverDeps = {
         revParse: async (ref) => {
@@ -158,7 +252,7 @@ export default (async ({ $, client }) => {
       }
 
       try {
-        const { sha, source } = await resolveTargetSha(searchText, deps)
+        const { sha, source } = await resolveTargetShaFromArgs(args, deps)
 
         if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) {
           log(client, "warn", `Could not resolve a valid SHA (source=${source}, sha=${sha ?? "null"})`)
@@ -169,7 +263,7 @@ export default (async ({ $, client }) => {
         const status = hasIssues ? "failed" : "passed"
         const note = `${REVIEW_MARKER}\nReview-Status: ${status}\n\n${reviewText}`
 
-        await $`git notes add -f -m ${note} ${sha}`.quiet()
+        await $`git notes --ref=${REVIEW_NOTES_REF} add -f -m ${note} ${sha}`.quiet()
         log(client, "info", `Attached review note (${status}) to ${sha.slice(0, 7)} (source=${source})`)
       } catch (error) {
         log(client, "error", `Failed to attach review note: ${error instanceof Error ? error.message : String(error)}`)

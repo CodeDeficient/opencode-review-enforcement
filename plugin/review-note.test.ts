@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test"
-import { extractSha, extractPrNumber, isReviewTask, resolveTargetSha, type ResolverDeps, type RunResult } from "./review-note"
+import { extractSha, extractPrNumber, resolveTargetShaFromArgs, type ResolverDeps, type RunResult } from "./review-note"
 
 function ok(stdout: string): RunResult {
   return { stdout, stderr: "", exitCode: 0 }
@@ -50,6 +50,30 @@ describe("extractSha", () => {
   it("returns null when hex is preceded by # (PR ref)", () => {
     expect(extractSha("#1234567")).toBeNull()
   })
+
+  it("returns null when hex is preceded by PR (explicit PR ref)", () => {
+    expect(extractSha("PR 1234567")).toBeNull()
+  })
+
+  it("returns null when hex is preceded by PR in natural prompt", () => {
+    expect(extractSha("Review PR 1234567")).toBeNull()
+  })
+
+  it("returns null when hex is preceded by pr- (branch name like upgrade-pr-1234567)", () => {
+    expect(extractSha("Review branch upgrade-pr-1234567")).toBeNull()
+  })
+
+  it("returns null when hex is preceded by pr_ (underscore variant)", () => {
+    expect(extractSha("upgrade_pr_1234567")).toBeNull()
+  })
+
+  it("returns null when hex is preceded by pr/ (path variant)", () => {
+    expect(extractSha("feature/pr/1234567")).toBeNull()
+  })
+
+  it("still extracts hex after unrelated word ending in prep (not pr boundary)", () => {
+    expect(extractSha("upgrade prep 1234567")).toBe("1234567")
+  })
 })
 
 describe("extractPrNumber", () => {
@@ -76,215 +100,262 @@ describe("extractPrNumber", () => {
   it("extracts PR number without word boundary before hash", () => {
     expect(extractPrNumber("text#742")).toBe("742")
   })
-})
 
-describe("isReviewTask", () => {
-  it("returns true when command is exactly 'review'", () => {
-    expect(isReviewTask({ command: "review" })).toBe(true)
+  it("extracts PR number from 'PR 7' without hash", () => {
+    expect(extractPrNumber("PR 7")).toBe("7")
   })
 
-  it("returns true when command starts with 'review' and includes extra text", () => {
-    expect(isReviewTask({ command: "review 4c2df93" })).toBe(true)
+  it("extracts PR number from 'Review PR 7' without hash", () => {
+    expect(extractPrNumber("Review PR 7")).toBe("7")
   })
 
-  it("returns true when subagent_type is 'reviewer' without command", () => {
-    expect(isReviewTask({ subagent_type: "reviewer" })).toBe(true)
+  it("extracts PR number from 'PR #7' with hash", () => {
+    expect(extractPrNumber("PR #7")).toBe("7")
   })
 
-  it("returns true when both command and subagent_type are set", () => {
-    expect(isReviewTask({ command: "review 4c2df93", subagent_type: "reviewer" })).toBe(true)
+  it("returns null for incidental 'PR NNN' in prose (not a target selector)", () => {
+    expect(extractPrNumber("Reviewing PR 8 changes")).toBeNull()
   })
 
-  it("returns false when command is a non-review command", () => {
-    expect(isReviewTask({ command: "build" })).toBe(false)
+  it("returns null for 'PR NNN' preceded by non-review word", () => {
+    expect(extractPrNumber("check PR 7")).toBeNull()
   })
 
-  it("returns false when command starts with review but is not a review command", () => {
-    expect(isReviewTask({ command: "reviewer" })).toBe(false)
-    expect(isReviewTask({ command: "reviewNotes" })).toBe(false)
-  })
-
-  it("returns false for empty args", () => {
-    expect(isReviewTask({})).toBe(false)
+  it("returns null for 'PR NNN' in middle of sentence", () => {
+    expect(extractPrNumber("Please review PR 8")).toBeNull()
   })
 })
 
-describe("resolveTargetSha", () => {
-  it("returns HEAD when no SHA and no PR are present", async () => {
-    const deps: ResolverDeps = {
-      revParse: async (ref) => ref === "HEAD" ? ok("abc1234") : fail(),
-      prView: async () => fail(),
-      log: () => {},
-    }
-
-    const result = await resolveTargetSha("", deps)
-
-    expect(result.sha).toBe("abc1234")
-    expect(result.source).toBe("HEAD")
-  })
-
-  it("returns null when all resolvers fail", async () => {
+describe("resolveTargetShaFromArgs", () => {
+  it("resolves PR 7 from prompt when description is generic", async () => {
     const deps: ResolverDeps = {
       revParse: async () => fail(),
-      prView: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_from_prompt" })),
       log: () => {},
     }
 
-    const result = await resolveTargetSha("", deps)
+    const result = await resolveTargetShaFromArgs(
+      { description: "code review", prompt: "PR 7", command: "" },
+      deps,
+    )
 
-    expect(result.sha).toBeNull()
-    expect(result.source).toBe("")
+    expect(result.sha).toBe("prsha_from_prompt")
+    expect(result.source).toBe("PR #7")
   })
 
-  it("resolves a PR number and returns headRefOid", async () => {
+  it("resolves #7 from prompt when description is generic", async () => {
     const deps: ResolverDeps = {
       revParse: async () => fail(),
-      prView: async () => ok(JSON.stringify({ headRefOid: "prsha123" })),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_hashprompt" })),
       log: () => {},
     }
 
-    const result = await resolveTargetSha("review #742", deps)
+    const result = await resolveTargetShaFromArgs(
+      { description: "code review", prompt: "#7", command: "" },
+      deps,
+    )
 
-    expect(result.sha).toBe("prsha123")
-    expect(result.source).toBe("PR #742")
+    expect(result.sha).toBe("prsha_hashprompt")
+    expect(result.source).toBe("PR #7")
   })
 
-  it("resolves a valid SHA and does not consult PR resolver", async () => {
+  it("does not resolve incidental PR 8 in description", async () => {
     let prViewCalled = false
-    const deps: ResolverDeps = {
-      revParse: async (ref) => ref === "abc1234" ? ok("fullsha123") : fail(),
-      prView: async () => { prViewCalled = true; return fail() },
-      log: () => {},
-    }
-
-    const result = await resolveTargetSha("review commit abc1234", deps)
-
-    expect(result.sha).toBe("fullsha123")
-    expect(result.source).toBe("sha:abc1234")
-    expect(prViewCalled).toBe(false)
-  })
-
-  it("falls through to PR resolver when SHA matches but rev-parse fails (THE BUG)", async () => {
-    const deps: ResolverDeps = {
-      revParse: async (ref) => ref === "deadbeef" ? fail(1) : ref === "HEAD" ? ok("headsha") : fail(),
-      prView: async () => ok(JSON.stringify({ headRefOid: "prsha789" })),
-      log: () => {},
-    }
-
-    const result = await resolveTargetSha("review commit deadbeef #742", deps)
-
-    expect(result.sha).toBe("prsha789")
-    expect(result.source).toBe("PR #742")
-  })
-
-  it("falls through to PR resolver when 7+ digit PR number is not mistaken for SHA", async () => {
     const deps: ResolverDeps = {
       revParse: async (ref) => ref === "HEAD" ? ok("headsha") : fail(),
-      prView: async () => ok(JSON.stringify({ headRefOid: "pr_long" })),
-      log: () => {},
-    }
-
-    const result = await resolveTargetSha("review #1234567", deps)
-
-    expect(result.sha).toBe("pr_long")
-    expect(result.source).toBe("PR #1234567")
-  })
-
-  it("treats bare decimal in prompt as SHA, overriding PR ref", async () => {
-    let prViewCalled = false
-    const deps: ResolverDeps = {
-      revParse: async (ref) => ref === "1234567" ? ok("bare_decimal_sha") : fail(),
       prView: async () => { prViewCalled = true; return ok(JSON.stringify({ headRefOid: "prsha" })) },
       log: () => {},
     }
 
-    const result = await resolveTargetSha("review issue 1234567 and check #742", deps)
+    const result = await resolveTargetShaFromArgs(
+      { description: "Reviewing PR 8 changes", prompt: "", command: "" },
+      deps,
+    )
 
-    expect(result.sha).toBe("bare_decimal_sha")
-    expect(result.source).toBe("sha:1234567")
+    expect(result.sha).toBe("headsha")
+    expect(result.source).toBe("HEAD")
     expect(prViewCalled).toBe(false)
   })
 
-  it("falls through to HEAD when SHA fails and PR fails", async () => {
+  it("resolves SHA from prompt when description is generic", async () => {
     const deps: ResolverDeps = {
-      revParse: async (ref) => ref === "HEAD" ? ok("headsha") : fail(),
+      revParse: async (ref) => ref === "abc1234" ? ok("fullsha") : fail(),
       prView: async () => fail(),
       log: () => {},
     }
 
-    const result = await resolveTargetSha("review commit deadbeef #742", deps)
+    const result = await resolveTargetShaFromArgs(
+      { description: "code review", prompt: "abc1234", command: "" },
+      deps,
+    )
 
-    expect(result.sha).toBe("headsha")
-    expect(result.source).toBe("HEAD")
+    expect(result.sha).toBe("fullsha")
+    expect(result.source).toBe("sha:abc1234")
   })
 
-  it("falls through to HEAD when PR returns malformed JSON", async () => {
-    const deps: ResolverDeps = {
-      revParse: async (ref) => ref === "HEAD" ? ok("headsha") : fail(),
-      prView: async () => ok("not valid json"),
-      log: () => {},
-    }
-
-    const result = await resolveTargetSha("#742", deps)
-
-    expect(result.sha).toBe("headsha")
-    expect(result.source).toBe("HEAD")
-  })
-
-  it("falls through to HEAD when PR returns headRefOid as null", async () => {
-    const deps: ResolverDeps = {
-      revParse: async (ref) => ref === "HEAD" ? ok("headsha") : fail(),
-      prView: async () => ok(JSON.stringify({ headRefOid: null })),
-      log: () => {},
-    }
-
-    const result = await resolveTargetSha("#742", deps)
-
-    expect(result.sha).toBe("headsha")
-    expect(result.source).toBe("HEAD")
-  })
-
-  it("returns null when all three resolvers fail", async () => {
+  it("resolves from /review command prompt with Input: prefix", async () => {
     const deps: ResolverDeps = {
       revParse: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_input" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "", prompt: "Input: #7", command: "review" },
+      deps,
+    )
+
+    expect(result.sha).toBe("prsha_input")
+    expect(result.source).toBe("PR #7")
+  })
+
+  it("resolves SHA from description when description is itself a target selector", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "def5678" ? ok("fullsha_desc") : fail(),
       prView: async () => fail(),
       log: () => {},
     }
 
-    const result = await resolveTargetSha("deadbeef #742", deps)
+    const result = await resolveTargetShaFromArgs(
+      { description: "review commit def5678", prompt: "", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("fullsha_desc")
+    expect(result.source).toBe("sha:def5678")
+  })
+
+  it("falls back to HEAD when no target found in any field", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "HEAD" ? ok("headsha") : fail(),
+      prView: async () => fail(),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "code review", prompt: "", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("headsha")
+    expect(result.source).toBe("HEAD")
+  })
+
+  it("resolves PR 7 from prompt even when description contains incidental PR 8", async () => {
+    const deps: ResolverDeps = {
+      revParse: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_correct" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "Reviewing PR 8 changes", prompt: "PR 7", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("prsha_correct")
+    expect(result.source).toBe("PR #7")
+  })
+
+  it("resolves review branch <name> to the branch tip", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "fix/something" ? ok("branchsha") : fail(),
+      prView: async () => fail(),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "", prompt: "review branch fix/something", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("branchsha")
+    expect(result.source).toBe("branch:fix/something")
+  })
+
+  it("does not fall back to HEAD when target selector does not resolve", async () => {
+    let headCalled = false
+    const deps: ResolverDeps = {
+      revParse: async (ref) => { if (ref === "HEAD") headCalled = true; return fail() },
+      prView: async () => fail(),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "", prompt: "review branch nonexistent-branch", command: "" },
+      deps,
+    )
 
     expect(result.sha).toBeNull()
     expect(result.source).toBe("")
+    expect(headCalled).toBe(false)
   })
 
-  it("extracts SHA from prompt content in searchText", async () => {
+  it("does not fall back to HEAD when explicit SHA prompt does not resolve", async () => {
+    let headCalled = false
     const deps: ResolverDeps = {
-      revParse: async (ref) => ref === "def5678" ? ok("fullpromptsha") : fail(),
+      revParse: async (ref) => { if (ref === "HEAD") headCalled = true; return fail() },
       prView: async () => fail(),
       log: () => {},
     }
 
-    const result = await resolveTargetSha("Please carefully review commit def5678 for any issues", deps)
+    const result = await resolveTargetShaFromArgs(
+      { description: "", prompt: "abc1234", command: "" },
+      deps,
+    )
 
-    expect(result.sha).toBe("fullpromptsha")
-    expect(result.source).toBe("sha:def5678")
+    expect(result.sha).toBeNull()
+    expect(result.source).toBe("")
+    expect(headCalled).toBe(false)
+  })
+
+  it("accepts command with target argument (review abc1234) in Input: path", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "abc1234" ? ok("fullsha_cmdarg") : fail(),
+      prView: async () => fail(),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "", prompt: "Input: abc1234", command: "review abc1234" },
+      deps,
+    )
+
+    expect(result.sha).toBe("fullsha_cmdarg")
+    expect(result.source).toBe("sha:abc1234")
+  })
+
+  it("falls through to PR resolver when SHA matches but rev-parse fails", async () => {
+    const deps: ResolverDeps = {
+      revParse: async () => fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_fallthrough" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "", prompt: "deadbeef #742", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("prsha_fallthrough")
+    expect(result.source).toBe("PR #742")
   })
 })
 
 describe("isCanonicalReviewInvocation", () => {
-  it("returns true for /review command (no args)", () => {
+  it("returns true for /review command (no args, Input: prompt)", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
-    expect(isCanonicalReviewInvocation({ command: "review" })).toBe(true)
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input:" })).toBe(true)
   })
 
   it("returns true for /review <sha> command path", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
-    expect(isCanonicalReviewInvocation({ command: "review abc1234" })).toBe(true)
+    expect(isCanonicalReviewInvocation({ command: "review abc1234", prompt: "Input: abc1234" })).toBe(true)
   })
 
   it("returns true for /review <pr> command path", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
-    expect(isCanonicalReviewInvocation({ command: "review #7" })).toBe(true)
+    expect(isCanonicalReviewInvocation({ command: "review #7", prompt: "Input: #7" })).toBe(true)
   })
 
   it("returns true for reviewer subtask with SHA-only prompt", () => {
@@ -302,15 +373,65 @@ describe("isCanonicalReviewInvocation", () => {
     expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "#7" })).toBe(true)
   })
 
-  it("returns true for reviewer subtask with branch-name prompt", () => {
+  it("returns false for bare branch name (must use 'review branch' prefix)", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
-    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "deterministic-review-prompt" })).toBe(true)
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "deterministic-review-prompt" })).toBe(false)
+  })
+
+  it("returns true for 'review branch <name>' explicit prefix", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "review branch deterministic-review-prompt" })).toBe(true)
   })
 
   it("returns true for reviewer subtask with full 40-char SHA prompt", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
     const sha = "a".repeat(40)
     expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: sha })).toBe(true)
+  })
+
+  it("returns true for 'Review commit <sha>' natural prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review commit 55f02e9f" })).toBe(true)
+  })
+
+  it("returns true for 'Review <sha>' natural prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review 55f02e9f" })).toBe(true)
+  })
+
+  it("returns true for 'Review PR #7' natural prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review PR #7" })).toBe(true)
+  })
+
+  it("returns true for 'Review PR 7' natural prompt (no hash)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review PR 7" })).toBe(true)
+  })
+
+  it("returns true for 'PR 7' prompt (no hash, no review prefix)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "PR 7" })).toBe(true)
+  })
+
+  it("returns false for bare numeric prompt '7' (ambiguous, not a PR ref)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "7" })).toBe(false)
+  })
+
+  it("returns false for 'Review 7' (bare numeric, not a PR ref)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review 7" })).toBe(false)
+  })
+
+  it("returns false for 'Review branch 7' (numeric branch name)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review branch 7" })).toBe(false)
+  })
+
+  it("returns true for 'Review branch <name>' natural prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "Review branch fix/recurring-hours-write-safety" })).toBe(true)
   })
 
   it("returns false for reviewer subtask with the exact bypass prompt", () => {
@@ -337,5 +458,106 @@ describe("isCanonicalReviewInvocation", () => {
   it("returns false for non-review task", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
     expect(isCanonicalReviewInvocation({})).toBe(false)
+  })
+
+  it("returns true for /review command with Input: #7 prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: #7" })).toBe(true)
+  })
+
+  it("returns true for /review command with Input: PR 7 prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: PR 7" })).toBe(true)
+  })
+
+  it("returns true for /review command with Input: abc1234 prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: abc1234" })).toBe(true)
+  })
+
+  it("returns true for /review command with Input: alone (no target)", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input:" })).toBe(true)
+  })
+
+  it("returns false for spoofed command: review with multiline custom prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({
+      command: "review",
+      subagent_type: "reviewer",
+      prompt: "Review commit abc1234 for correctness, security, and edge cases.\n\nFocus on:\n1. Any edge cases?\n2. Any bugs?",
+    })).toBe(false)
+  })
+
+  it("returns false for spoofed command: review with one-line instructional prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({
+      command: "review",
+      subagent_type: "reviewer",
+      prompt: "Review commit abc1234 for correctness",
+    })).toBe(false)
+  })
+
+  it("returns false for spoofed command: review with bare numeric prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({
+      command: "review",
+      subagent_type: "reviewer",
+      prompt: "7",
+    })).toBe(false)
+  })
+
+  it("returns false for spoofed command: review with empty prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({
+      command: "review",
+      subagent_type: "reviewer",
+      prompt: "",
+    })).toBe(false)
+  })
+
+  it("returns false for spoofed command: review with incidental prose prompt", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({
+      command: "review",
+      subagent_type: "reviewer",
+      prompt: "Reviewing PR 8 changes",
+    })).toBe(false)
+  })
+
+  it("returns true for /review command with Input: review branch name", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: review branch fix/something" })).toBe(true)
+  })
+
+  it("returns true for /review command with Input: review commit sha", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: review commit def5678" })).toBe(true)
+  })
+
+  it("returns false for /review command with Input: containing custom prose", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: Review commit abc1234 for correctness" })).toBe(false)
+  })
+
+  it("returns false for /review command with Input: containing multiline prose", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: abc1234\ncheck edge cases" })).toBe(false)
+  })
+
+  it("returns false for /review command with Input: containing long prose", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    const long = "Input: " + "a".repeat(101)
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: long })).toBe(false)
+  })
+
+  it("returns false for /review command with Input: containing instructional text", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: Please review commit abc1234 for bugs" })).toBe(false)
+  })
+
+  it("returns false for /review command with Input: containing focus areas", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: abc1234 focus on security" })).toBe(false)
   })
 })

@@ -40,7 +40,7 @@ while read local_ref local_sha remote_ref remote_sha; do
       continue
     fi
 
-    NOTE=$(git notes show "$sha" 2>/dev/null || true)
+    NOTE=$(git notes --ref=reviews show "$sha" 2>/dev/null || true)
     if [ -z "$NOTE" ] || ! echo "$NOTE" | grep -q "$REVIEW_MARKER"; then
       UNREVIEWED_SHAS="$UNREVIEWED_SHAS $sha"
     fi
