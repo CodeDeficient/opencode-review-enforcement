@@ -324,6 +324,22 @@ describe("resolveTargetShaFromArgs", () => {
     expect(result.sha).toBe("fullsha_cmdarg")
     expect(result.source).toBe("sha:abc1234")
   })
+
+  it("falls through to PR resolver when SHA matches but rev-parse fails", async () => {
+    const deps: ResolverDeps = {
+      revParse: async (ref) => ref === "deadbeef" ? fail() : fail(),
+      prView: async () => ok(JSON.stringify({ headRefOid: "prsha_fallthrough" })),
+      log: () => {},
+    }
+
+    const result = await resolveTargetShaFromArgs(
+      { description: "", prompt: "deadbeef #742", command: "" },
+      deps,
+    )
+
+    expect(result.sha).toBe("prsha_fallthrough")
+    expect(result.source).toBe("PR #742")
+  })
 })
 
 describe("isCanonicalReviewInvocation", () => {

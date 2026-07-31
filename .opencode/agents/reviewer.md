@@ -35,8 +35,9 @@ Based on the input provided, determine which type of review to perform:
 2. **Commit hash** (40-char SHA or short hash): Review that specific commit
    - Run: `git show <input>`
 
-3. **Branch name**: Compare current branch to the specified branch
-   - Run: `git diff <input>...HEAD`
+3. **Branch name** (with `review branch` prefix): Resolve the branch tip and review that commit
+   - Run: `git show <branch-name>` to review the tip commit
+   - Bare branch names (without `review branch` prefix) are accepted for review but do not produce enforcement notes
 
 4. **PR URL or number** (contains "github.com" or "pull" or looks like a PR number): Review the pull request
    - Run: `gh pr view <input>` to get PR context

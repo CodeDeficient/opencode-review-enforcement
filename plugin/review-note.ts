@@ -109,6 +109,18 @@ export async function resolveTargetShaFromArgs(
 
   const tryResolve = async (text: string): Promise<{ sha: string | null; source: string } | null> => {
     const trimmed = text.trim()
+
+    const branchMatch = trimmed.match(/^(?:review\s+branch\s+)([\w\-.\\/]+)$/i)
+    if (branchMatch) {
+      const branch = branchMatch[1]
+      const result = await deps.revParse(branch)
+      if (result.exitCode === 0) {
+        return { sha: result.stdout.trim() || null, source: `branch:${branch}` }
+      }
+      deps.log("warn", `rev-parse failed for branch ${branch} (exit ${result.exitCode})`)
+      return null
+    }
+
     const hexSha = extractSha(text)
     if (hexSha) {
       const result = await deps.revParse(hexSha)
@@ -134,16 +146,6 @@ export async function resolveTargetShaFromArgs(
       } else {
         deps.log("warn", `gh pr view failed for PR #${prNum} (exit ${result.exitCode})`)
       }
-    }
-
-    const branchMatch = trimmed.match(/^(?:review\s+branch\s+)([\w\-.\\/]+)$/i)
-    if (branchMatch) {
-      const branch = branchMatch[1]
-      const result = await deps.revParse(branch)
-      if (result.exitCode === 0) {
-        return { sha: result.stdout.trim() || null, source: `branch:${branch}` }
-      }
-      deps.log("warn", `rev-parse failed for branch ${branch} (exit ${result.exitCode})`)
     }
 
     return null
