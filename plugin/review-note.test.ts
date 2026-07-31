@@ -327,7 +327,7 @@ describe("resolveTargetShaFromArgs", () => {
 
   it("falls through to PR resolver when SHA matches but rev-parse fails", async () => {
     const deps: ResolverDeps = {
-      revParse: async (ref) => ref === "deadbeef" ? fail() : fail(),
+      revParse: async () => fail(),
       prView: async () => ok(JSON.stringify({ headRefOid: "prsha_fallthrough" })),
       log: () => {},
     }
