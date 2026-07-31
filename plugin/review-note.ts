@@ -46,7 +46,6 @@ export function isCanonicalReviewInvocation(args: {
     if (!afterInput) return true
     if (afterInput.includes("\n")) return false
     if (afterInput.length > 100) return false
-    if (/^[\w\-.\\/#]+$/.test(afterInput)) return true
     if (/^(?:review\s+)?(?:commit\s+)?[0-9a-f]{7,40}$/i.test(afterInput)) return true
     if (/^(?:review\s+)?(?:PR\s+)?#\d+$/i.test(afterInput)) return true
     if (/^(?:review\s+)?PR\s+\d+$/i.test(afterInput)) return true
@@ -76,7 +75,7 @@ function isTargetOnlyPrompt(prompt: string): boolean {
 
   if (/^\d+$/.test(target)) return false
 
-  if (target.length <= 100 && /^[\w\-.\\/]+$/.test(target)) return true
+  if (/^review\s+branch\s+/i.test(trimmed) && target.length <= 100 && /^[\w\-.\\/]+$/.test(target)) return true
 
   return false
 }
@@ -202,7 +201,6 @@ export async function resolveTargetShaFromArgs(
     if (/^(?:review\s+)?(?:PR\s+)?#\d+$/i.test(trimmed)) return true
     if (/^(?:review\s+)?PR\s+\d+$/i.test(trimmed)) return true
     if (/^review\s+branch\s+[\w\-.\\/]+$/i.test(trimmed)) return true
-    if (/^[\w\-.\\/]+$/.test(trimmed) && trimmed.length <= 100 && !/^\d+$/.test(trimmed)) return true
     return false
   }
 

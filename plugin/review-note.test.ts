@@ -549,9 +549,14 @@ describe("isCanonicalReviewInvocation", () => {
     expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "#7" })).toBe(true)
   })
 
-  it("returns true for reviewer subtask with branch-name prompt", () => {
+  it("returns false for bare branch name (must use 'review branch' prefix)", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
-    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "deterministic-review-prompt" })).toBe(true)
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "deterministic-review-prompt" })).toBe(false)
+  })
+
+  it("returns true for 'review branch <name>' explicit prefix", () => {
+    const { isCanonicalReviewInvocation } = require("./review-note")
+    expect(isCanonicalReviewInvocation({ subagent_type: "reviewer", prompt: "review branch deterministic-review-prompt" })).toBe(true)
   })
 
   it("returns true for reviewer subtask with full 40-char SHA prompt", () => {
@@ -698,7 +703,7 @@ describe("isCanonicalReviewInvocation", () => {
 
   it("returns true for /review command with Input: review branch name", () => {
     const { isCanonicalReviewInvocation } = require("./review-note")
-    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: fix/something" })).toBe(true)
+    expect(isCanonicalReviewInvocation({ command: "review", prompt: "Input: review branch fix/something" })).toBe(true)
   })
 
   it("returns true for /review command with Input: review commit sha", () => {
